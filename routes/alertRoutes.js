@@ -22,6 +22,12 @@ router.use(protect);
 router.get('/my', authorize('user'), alertController.getMyAlerts);
 router.get('/active', authorize('user'), alertController.getActiveAlert);
 
+// Volunteer routes - MUST be before /:id to avoid route conflict
+router.get('/nearby/active',
+  authorize('volunteer'),
+  alertController.getNearbyAlerts
+);
+
 // Create new alert
 router.post('/',
   authorize('user'),
@@ -30,7 +36,7 @@ router.post('/',
   alertController.createAlert
 );
 
-// Get alert by ID
+// Get alert by ID (must be after all /keyword routes)
 router.get('/:id', alertController.getAlert);
 
 // Update live location during alert
@@ -53,12 +59,7 @@ router.put('/:id/resolve',
   alertController.resolveAlert
 );
 
-// Volunteer routes
-router.get('/nearby/active',
-  authorize('volunteer'),
-  alertController.getNearbyAlerts
-);
-
+// Volunteer action routes
 router.put('/:id/accept',
   authorize('volunteer'),
   alertController.acceptAlert

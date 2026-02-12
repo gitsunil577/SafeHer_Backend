@@ -9,7 +9,8 @@ exports.getNearbyVolunteers = asyncHandler(async (req, res) => {
 
   let query = {
     isVerified: true,
-    status: 'active'
+    status: 'active',
+    isOnDuty: true
   };
 
   let volunteers;
@@ -200,6 +201,20 @@ exports.toggleDuty = asyncHandler(async (req, res) => {
 
   volunteer.isOnDuty = !volunteer.isOnDuty;
   await volunteer.save();
+
+  // Broadcast duty change to all connected clients via Socket.IO
+  if (req.io) {
+    req.io.emit('volunteer_status_update', {
+      volunteerId: volunteer._id,
+      volunteerName: req.user.name,
+      isOnDuty: volunteer.isOnDuty,
+      location: volunteer.currentLocation?.coordinates ? {
+        lat: volunteer.currentLocation.coordinates[1],
+        lng: volunteer.currentLocation.coordinates[0]
+      } : null,
+      timestamp: new Date()
+    });
+  }
 
   res.status(200).json({
     success: true,

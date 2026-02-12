@@ -138,10 +138,29 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle volunteer status updates
+  // Handle volunteer status updates - broadcast to all connected clients
   socket.on('volunteer_status', (data) => {
-    const { volunteerId, isOnDuty } = data;
+    const { volunteerId, volunteerName, isOnDuty, location } = data;
     console.log(`Volunteer ${volunteerId} is now ${isOnDuty ? 'on duty' : 'off duty'}`);
+    // Broadcast to ALL connected clients so user dashboards update in real-time
+    socket.broadcast.emit('volunteer_status_update', {
+      volunteerId,
+      volunteerName,
+      isOnDuty,
+      location,
+      timestamp: new Date()
+    });
+  });
+
+  // Handle volunteer location broadcast
+  socket.on('volunteer_location_update', (data) => {
+    const { volunteerId, latitude, longitude } = data;
+    socket.broadcast.emit('volunteer_moved', {
+      volunteerId,
+      latitude,
+      longitude,
+      timestamp: new Date()
+    });
   });
 
   socket.on('disconnect', () => {

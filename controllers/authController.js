@@ -66,7 +66,7 @@ exports.registerVolunteer = asyncHandler(async (req, res) => {
     role: 'volunteer'
   });
 
-  // Create volunteer profile
+  // Create volunteer profile (auto-verified and active)
   await Volunteer.create({
     user: user._id,
     idType,
@@ -74,7 +74,10 @@ exports.registerVolunteer = asyncHandler(async (req, res) => {
     occupation,
     experience,
     availability,
-    skills: skills ? skills.split(',').map(s => s.trim()) : []
+    skills: skills ? skills.split(',').map(s => s.trim()) : [],
+    isVerified: true,
+    status: 'active',
+    verifiedAt: new Date()
   });
 
   logger.auth('Volunteer registered successfully', email, true);

@@ -9,7 +9,14 @@
     "seed": "node utils/seeder.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["women-safety", "emergency", "assistance", "nodejs", "express", "mongodb"],
+  "keywords": [
+    "women-safety",
+    "emergency",
+    "assistance",
+    "nodejs",
+    "express",
+    "mongodb"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -22,7 +29,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.5",
     "morgan": "^1.10.1",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "twilio": "^5.12.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

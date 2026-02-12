@@ -1,6 +1,7 @@
 const { Alert, Volunteer, EmergencyContact, User } = require('../models');
 const { asyncHandler } = require('../middleware');
 const config = require('../config/config');
+const { notifyEmergencyContacts } = require('../services/notificationService');
 
 // @desc    Create new alert (SOS)
 // @route   POST /api/alerts
@@ -35,32 +36,51 @@ exports.createAlert = asyncHandler(async (req, res) => {
   });
 
   // Find nearby volunteers (within 5km radius)
-  const nearbyVolunteers = await Volunteer.find({
-    isVerified: true,
-    status: 'active',
-    isOnDuty: true,
-    currentLocation: {
-      $near: {
-        $geometry: {
-          type: 'Point',
-          coordinates: [longitude, latitude]
-        },
-        $maxDistance: config.alert.searchRadius * 1000 // Convert km to meters
+  let nearbyVolunteers = [];
+  try {
+    nearbyVolunteers = await Volunteer.find({
+      isVerified: true,
+      status: 'active',
+      isOnDuty: true,
+      currentLocation: {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [longitude, latitude]
+          },
+          $maxDistance: config.alert.searchRadius * 1000 // Convert km to meters
+        }
       }
-    }
-  })
-    .limit(config.alert.maxVolunteersToNotify)
-    .populate('user', 'name phone');
+    })
+      .limit(config.alert.maxVolunteersToNotify)
+      .populate('user', 'name phone');
+  } catch (err) {
+    // Geospatial query can fail if volunteers have no location set
+    console.log('Geospatial query failed, falling back to all on-duty volunteers');
+  }
+
+  // Fallback: if no nearby volunteers found, notify ALL on-duty volunteers
+  if (nearbyVolunteers.length === 0) {
+    nearbyVolunteers = await Volunteer.find({
+      isVerified: true,
+      status: 'active',
+      isOnDuty: true
+    })
+      .limit(config.alert.maxVolunteersToNotify)
+      .populate('user', 'name phone');
+  }
 
   // Add notified volunteers to alert
   const notifiedVolunteers = nearbyVolunteers.map(volunteer => ({
     volunteer: volunteer._id,
     notifiedAt: new Date(),
-    distance: calculateDistance(
-      latitude, longitude,
-      volunteer.currentLocation.coordinates[1],
-      volunteer.currentLocation.coordinates[0]
-    ),
+    distance: volunteer.currentLocation?.coordinates
+      ? calculateDistance(
+          latitude, longitude,
+          volunteer.currentLocation.coordinates[1],
+          volunteer.currentLocation.coordinates[0]
+        )
+      : null,
     status: 'notified'
   }));
 
@@ -72,12 +92,32 @@ exports.createAlert = asyncHandler(async (req, res) => {
     isActive: true
   });
 
-  alert.notifiedContacts = emergencyContacts.map(contact => ({
-    contact: contact._id,
-    notifiedAt: new Date(),
-    method: 'sms',
-    status: 'sent'
-  }));
+  // Send real SMS/call notifications to emergency contacts
+  let notificationResults = [];
+  if (emergencyContacts.length > 0) {
+    try {
+      notificationResults = await notifyEmergencyContacts(emergencyContacts, req.user, alert);
+    } catch (err) {
+      console.error('Emergency contact notification error:', err.message);
+    }
+  }
+
+  // Build notifiedContacts from actual send results
+  if (notificationResults.length > 0) {
+    alert.notifiedContacts = notificationResults.map(result => ({
+      contact: result.contactId,
+      notifiedAt: new Date(),
+      method: result.method,
+      status: result.status
+    }));
+  } else {
+    alert.notifiedContacts = emergencyContacts.map(contact => ({
+      contact: contact._id,
+      notifiedAt: new Date(),
+      method: 'sms',
+      status: 'pending'
+    }));
+  }
 
   await alert.save();
 
@@ -92,11 +132,6 @@ exports.createAlert = asyncHandler(async (req, res) => {
         userName: req.user.name,
         message: alert.message
       });
-    });
-
-    // Notify emergency contacts (in real app, would send SMS)
-    emergencyContacts.forEach(contact => {
-      console.log(`Notifying contact: ${contact.name} at ${contact.phone}`);
     });
   }
 
@@ -366,48 +401,64 @@ exports.resolveAlert = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get nearby alerts (for volunteers)
-// @route   GET /api/alerts/nearby
+// @desc    Get nearby active alerts (for volunteers)
+// @route   GET /api/alerts/nearby/active
 // @access  Private (Volunteer)
 exports.getNearbyAlerts = asyncHandler(async (req, res) => {
   const { latitude, longitude } = req.query;
 
-  if (!latitude || !longitude) {
-    return res.status(400).json({
-      success: false,
-      message: 'Location is required'
-    });
+  let alerts;
+
+  // If location provided, use geospatial query
+  if (latitude && longitude) {
+    try {
+      alerts = await Alert.find({
+        status: 'active',
+        location: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [parseFloat(longitude), parseFloat(latitude)]
+            },
+            $maxDistance: config.alert.searchRadius * 1000
+          }
+        }
+      })
+        .populate('user', 'name')
+        .select('location message type priority createdAt')
+        .limit(20);
+    } catch (err) {
+      // Geospatial query may fail if no 2dsphere index, fallback below
+      alerts = null;
+    }
   }
 
-  const alerts = await Alert.find({
-    status: 'active',
-    location: {
-      $near: {
-        $geometry: {
-          type: 'Point',
-          coordinates: [parseFloat(longitude), parseFloat(latitude)]
-        },
-        $maxDistance: config.alert.searchRadius * 1000
-      }
-    }
-  })
-    .populate('user', 'name')
-    .select('location message type priority createdAt');
+  // Fallback: get all active alerts (no location filter)
+  if (!alerts) {
+    alerts = await Alert.find({ status: 'active' })
+      .sort({ createdAt: -1 })
+      .populate('user', 'name')
+      .select('location message type priority createdAt')
+      .limit(20);
+  }
 
-  // Add distance to each alert
-  const alertsWithDistance = alerts.map(alert => ({
-    ...alert.toObject(),
-    distance: calculateDistance(
-      parseFloat(latitude),
-      parseFloat(longitude),
-      alert.location.coordinates[1],
-      alert.location.coordinates[0]
-    )
-  }));
+  // Add distance to each alert if volunteer location is available
+  const alertsWithDistance = alerts.map(alert => {
+    const alertObj = alert.toObject();
+    if (latitude && longitude && alert.location?.coordinates) {
+      alertObj.distance = calculateDistance(
+        parseFloat(latitude),
+        parseFloat(longitude),
+        alert.location.coordinates[1],
+        alert.location.coordinates[0]
+      );
+    }
+    return alertObj;
+  });
 
   res.status(200).json({
     success: true,
-    count: alerts.length,
+    count: alertsWithDistance.length,
     data: alertsWithDistance
   });
 });

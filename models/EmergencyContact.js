@@ -54,28 +54,26 @@ const emergencyContactSchema = new mongoose.Schema({
 emergencyContactSchema.index({ user: 1 });
 
 // Limit contacts per user to 5
-emergencyContactSchema.pre('save', async function(next) {
+emergencyContactSchema.pre('save', async function() {
   if (this.isNew) {
     const count = await this.constructor.countDocuments({ user: this.user });
     if (count >= 5) {
       const error = new Error('Maximum 5 emergency contacts allowed');
       error.statusCode = 400;
-      return next(error);
+      throw error;
     }
   }
   this.updatedAt = Date.now();
-  next();
 });
 
 // Ensure only one primary contact per user
-emergencyContactSchema.pre('save', async function(next) {
+emergencyContactSchema.pre('save', async function() {
   if (this.isPrimary) {
     await this.constructor.updateMany(
       { user: this.user, _id: { $ne: this._id } },
       { isPrimary: false }
     );
   }
-  next();
 });
 
 module.exports = mongoose.model('EmergencyContact', emergencyContactSchema);
