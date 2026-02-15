@@ -44,12 +44,9 @@ module.exports = {
     EXPIRED: 'expired'
   },
 
-  // Twilio Configuration
-  twilio: {
-    accountSid: process.env.TWILIO_ACCOUNT_SID,
-    authToken: process.env.TWILIO_AUTH_TOKEN,
-    phoneNumber: process.env.TWILIO_PHONE_NUMBER,
-    defaultCountryCode: process.env.TWILIO_DEFAULT_COUNTRY_CODE || '+91'
+  // Fast2SMS Configuration
+  sms: {
+    fast2smsApiKey: process.env.FAST2SMS_API_KEY
   },
 
   // Volunteer Status

@@ -130,7 +130,9 @@ exports.createAlert = asyncHandler(async (req, res) => {
         location: alert.location,
         distance: notifiedVolunteers.find(v => v.volunteer.equals(volunteer._id))?.distance,
         userName: req.user.name,
-        message: alert.message
+        message: alert.message,
+        type: alert.type || 'sos',
+        priority: alert.priority || 'high'
       });
     });
   }
@@ -398,6 +400,93 @@ exports.resolveAlert = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Alert resolved successfully'
+  });
+});
+
+// @desc    Submit feedback/rating for a resolved alert
+// @route   PUT /api/alerts/:id/feedback
+// @access  Private (User who created the alert)
+exports.submitFeedback = asyncHandler(async (req, res) => {
+  const { rating, feedback } = req.body;
+  const alert = await Alert.findById(req.params.id);
+
+  if (!alert) {
+    return res.status(404).json({
+      success: false,
+      message: 'Alert not found'
+    });
+  }
+
+  if (!alert.user.equals(req.user.id)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Only the alert creator can submit feedback'
+    });
+  }
+
+  if (alert.status !== 'resolved') {
+    return res.status(400).json({
+      success: false,
+      message: 'Feedback can only be submitted for resolved alerts'
+    });
+  }
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({
+      success: false,
+      message: 'Rating must be between 1 and 5'
+    });
+  }
+
+  // Update resolution with feedback
+  alert.resolution.rating = rating;
+  alert.resolution.feedback = feedback || '';
+  await alert.save();
+
+  // Update the responding volunteer's rating stats
+  if (alert.respondingVolunteer?.volunteer) {
+    const volunteer = await Volunteer.findById(alert.respondingVolunteer.volunteer);
+    if (volunteer) {
+      const totalRating = volunteer.stats.rating * volunteer.stats.totalRatings + rating;
+      volunteer.stats.totalRatings += 1;
+      volunteer.stats.rating = totalRating / volunteer.stats.totalRatings;
+      await volunteer.save();
+      await volunteer.checkBadges();
+    }
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Thank you for your feedback!'
+  });
+});
+
+// @desc    Get resolved alerts pending feedback from user
+// @route   GET /api/alerts/pending-feedback
+// @access  Private (User)
+exports.getPendingFeedback = asyncHandler(async (req, res) => {
+  const alerts = await Alert.find({
+    user: req.user.id,
+    status: 'resolved',
+    'respondingVolunteer.volunteer': { $exists: true, $ne: null },
+    $or: [
+      { 'resolution.rating': { $exists: false } },
+      { 'resolution.rating': null },
+      { 'resolution.rating': 0 }
+    ]
+  })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .populate({
+      path: 'respondingVolunteer.volunteer',
+      populate: { path: 'user', select: 'name' }
+    })
+    .select('type message createdAt respondingVolunteer resolution');
+
+  res.status(200).json({
+    success: true,
+    count: alerts.length,
+    data: alerts
   });
 });
 

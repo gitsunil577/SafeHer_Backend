@@ -34,5 +34,7 @@ router.post('/safezones', [
   body('latitude').isFloat({ min: -90, max: 90 }),
   body('longitude').isFloat({ min: -180, max: 180 })
 ], validate, adminController.createSafeZone);
+router.put('/safezones/:id', adminController.updateSafeZone);
+router.delete('/safezones/:id', adminController.deleteSafeZone);
 
 module.exports = router;

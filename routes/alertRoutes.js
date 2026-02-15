@@ -21,6 +21,7 @@ router.use(protect);
 // User routes - Get user's alerts and active alert
 router.get('/my', authorize('user'), alertController.getMyAlerts);
 router.get('/active', authorize('user'), alertController.getActiveAlert);
+router.get('/pending-feedback', authorize('user'), alertController.getPendingFeedback);
 
 // Volunteer routes - MUST be before /:id to avoid route conflict
 router.get('/nearby/active',
@@ -57,6 +58,12 @@ router.put('/:id/cancel',
 router.put('/:id/resolve',
   authorize('user', 'volunteer', 'admin'),
   alertController.resolveAlert
+);
+
+// Submit feedback for resolved alert
+router.put('/:id/feedback',
+  authorize('user'),
+  alertController.submitFeedback
 );
 
 // Volunteer action routes

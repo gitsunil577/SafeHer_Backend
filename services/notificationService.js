@@ -1,86 +1,62 @@
 const config = require('../config/config');
 
-let twilioClient = null;
-
 /**
- * Normalize phone number to E.164 format.
- * If no country code prefix (+), adds the default country code from config.
+ * Clean phone number to 10-digit Indian mobile number
  */
-function normalizePhone(phone) {
-  // Strip spaces, dashes, parentheses
+function cleanPhone(phone) {
   let cleaned = phone.replace(/[\s\-()]/g, '');
-
-  // Already has country code
-  if (cleaned.startsWith('+')) return cleaned;
-
-  // Add default country code (India +91)
-  const defaultCode = config.twilio.defaultCountryCode || '+91';
-  return defaultCode + cleaned;
-}
-
-function getClient() {
-  if (!twilioClient) {
-    const { accountSid, authToken } = config.twilio;
-    if (!accountSid || !authToken || accountSid === 'your_twilio_account_sid') {
-      console.warn('Twilio credentials not configured - SMS/call notifications disabled');
-      return null;
-    }
-    const twilio = require('twilio');
-    twilioClient = twilio(accountSid, authToken);
-  }
-  return twilioClient;
+  if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
+  if (cleaned.startsWith('91') && cleaned.length === 12) cleaned = cleaned.slice(2);
+  if (cleaned.startsWith('0')) cleaned = cleaned.slice(1);
+  return cleaned;
 }
 
 /**
- * Send an SMS message via Twilio
+ * Send SMS via Fast2SMS
+ * Docs: https://docs.fast2sms.com
  */
 async function sendSMS(to, message) {
-  const normalized = normalizePhone(to);
-  const client = getClient();
-  if (!client) {
-    console.log(`[SMS STUB] To: ${normalized} | Message: ${message}`);
+  const apiKey = config.sms.fast2smsApiKey;
+  const phone = cleanPhone(to);
+
+  if (!apiKey) {
+    console.log(`[SMS STUB] To: ${phone} | Message: ${message}`);
     return { success: true, stub: true };
   }
 
-  const result = await client.messages.create({
-    body: message,
-    from: config.twilio.phoneNumber,
-    to: normalized
-  });
+  try {
+    const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+      method: 'POST',
+      headers: {
+        'authorization': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        route: 'q',
+        message: message,
+        language: 'english',
+        flash: 0,
+        numbers: phone
+      })
+    });
 
-  console.log(`[SMS] Sent to ${to} | SID: ${result.sid}`);
-  return { success: true, sid: result.sid };
-}
+    const data = await response.json();
 
-/**
- * Make a voice call via Twilio with a TwiML message
- */
-async function makeCall(to, message) {
-  const normalized = normalizePhone(to);
-  const client = getClient();
-  if (!client) {
-    console.log(`[CALL STUB] To: ${normalized} | Message: ${message}`);
-    return { success: true, stub: true };
+    if (data.return === true) {
+      console.log(`[SMS] Sent to ${phone} | ID: ${data.request_id}`);
+      return { success: true, requestId: data.request_id };
+    } else {
+      console.error(`[SMS ERROR] Fast2SMS:`, data.message);
+      return { success: false, error: data.message };
+    }
+  } catch (err) {
+    console.error(`[SMS ERROR] Failed to send to ${phone}:`, err.message);
+    return { success: false, error: err.message };
   }
-
-  const twiml = `<Response><Say voice="alice" loop="2">${message}</Say></Response>`;
-
-  const result = await client.calls.create({
-    twiml,
-    from: config.twilio.phoneNumber,
-    to: normalized
-  });
-
-  console.log(`[CALL] Initiated to ${to} | SID: ${result.sid}`);
-  return { success: true, sid: result.sid };
 }
 
 /**
- * Notify all emergency contacts for an SOS alert.
- * - SMS with live location link sent to ALL contacts
- * - Phone call made to PRIMARY contact only
- *
- * Returns array of { contactId, method, status } results
+ * Notify all emergency contacts for an SOS alert via SMS.
  */
 async function notifyEmergencyContacts(contacts, user, alert) {
   const results = [];
@@ -88,36 +64,24 @@ async function notifyEmergencyContacts(contacts, user, alert) {
   const locationLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
   const smsMessage =
-    `EMERGENCY ALERT! ${user.name} has triggered an SOS alert. ` +
-    `They need help. Live location: ${locationLink}`;
-
-  const callMessage =
-    `Emergency alert. ${user.name} has triggered an SOS emergency alert and needs immediate help. ` +
-    `Please check your text messages for their live location. This is an automated call from SafeHer.`;
+    `EMERGENCY! ${user.name} triggered SOS on SafeHer and needs help. ` +
+    `Location: ${locationLink}`;
 
   for (const contact of contacts) {
-    // Send SMS to every contact
     try {
-      await sendSMS(contact.phone, smsMessage);
-      results.push({ contactId: contact._id, method: 'sms', status: 'sent' });
+      const smsResult = await sendSMS(contact.phone, smsMessage);
+      results.push({
+        contactId: contact._id,
+        method: 'sms',
+        status: smsResult.success ? 'sent' : 'failed'
+      });
     } catch (err) {
-      console.error(`[SMS ERROR] Failed to send to ${contact.phone}:`, err.message);
+      console.error(`[SMS ERROR] ${contact.phone}:`, err.message);
       results.push({ contactId: contact._id, method: 'sms', status: 'failed' });
-    }
-
-    // Make call to primary contact only
-    if (contact.isPrimary) {
-      try {
-        await makeCall(contact.phone, callMessage);
-        results.push({ contactId: contact._id, method: 'call', status: 'sent' });
-      } catch (err) {
-        console.error(`[CALL ERROR] Failed to call ${contact.phone}:`, err.message);
-        results.push({ contactId: contact._id, method: 'call', status: 'failed' });
-      }
     }
   }
 
   return results;
 }
 
-module.exports = { sendSMS, makeCall, notifyEmergencyContacts };
+module.exports = { sendSMS, notifyEmergencyContacts };

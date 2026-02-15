@@ -428,3 +428,59 @@ exports.getSafeZones = asyncHandler(async (req, res) => {
     data: safeZones
   });
 });
+
+// @desc    Update safe zone
+// @route   PUT /api/admin/safezones/:id
+// @access  Private (Admin)
+exports.updateSafeZone = asyncHandler(async (req, res) => {
+  const { name, type, latitude, longitude, address, phone, operatingHours, services } = req.body;
+
+  const updateData = { name, type, phone, operatingHours, services };
+  if (latitude !== undefined && longitude !== undefined) {
+    updateData.location = {
+      type: 'Point',
+      coordinates: [longitude, latitude],
+      address: address || ''
+    };
+  } else if (address !== undefined) {
+    updateData['location.address'] = address;
+  }
+
+  const safeZone = await SafeZone.findByIdAndUpdate(
+    req.params.id,
+    updateData,
+    { new: true, runValidators: true }
+  );
+
+  if (!safeZone) {
+    return res.status(404).json({
+      success: false,
+      message: 'Safe zone not found'
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Safe zone updated successfully',
+    data: safeZone
+  });
+});
+
+// @desc    Delete safe zone
+// @route   DELETE /api/admin/safezones/:id
+// @access  Private (Admin)
+exports.deleteSafeZone = asyncHandler(async (req, res) => {
+  const safeZone = await SafeZone.findByIdAndDelete(req.params.id);
+
+  if (!safeZone) {
+    return res.status(404).json({
+      success: false,
+      message: 'Safe zone not found'
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Safe zone deleted successfully'
+  });
+});
