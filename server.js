@@ -168,6 +168,37 @@ io.on('connection', (socket) => {
   });
 });
 
+// Cleanup stale alerts: mark old active/responding alerts as expired, delete 7+ day old alerts
+const cleanupAlerts = async () => {
+  try {
+    const Alert = require('./models/Alert');
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // Mark active/responding alerts older than 24 hours as expired
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const expiredResult = await Alert.updateMany(
+      {
+        status: { $in: ['active', 'pending', 'responding'] },
+        createdAt: { $lt: oneDayAgo }
+      },
+      { $set: { status: 'expired' } }
+    );
+    if (expiredResult.modifiedCount > 0) {
+      console.log(`[Cleanup] Expired ${expiredResult.modifiedCount} stale alert(s)`);
+    }
+
+    // Delete all alerts older than 7 days
+    const deleteResult = await Alert.deleteMany({
+      createdAt: { $lt: sevenDaysAgo }
+    });
+    if (deleteResult.deletedCount > 0) {
+      console.log(`[Cleanup] Deleted ${deleteResult.deletedCount} alert(s) older than 7 days`);
+    }
+  } catch (err) {
+    console.error('[Cleanup] Error cleaning up alerts:', err.message);
+  }
+};
+
 // Start server
 const PORT = config.server.port;
 server.listen(PORT, () => {
@@ -182,6 +213,10 @@ server.listen(PORT, () => {
   ║                                                           ║
   ╚═══════════════════════════════════════════════════════════╝
   `);
+
+  // Run cleanup on startup and every 6 hours
+  cleanupAlerts();
+  setInterval(cleanupAlerts, 6 * 60 * 60 * 1000);
 });
 
 // Handle unhandled promise rejections

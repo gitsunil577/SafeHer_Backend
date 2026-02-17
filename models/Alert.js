@@ -133,6 +133,8 @@ const alertSchema = new mongoose.Schema({
 alertSchema.index({ location: '2dsphere' });
 alertSchema.index({ status: 1, createdAt: -1 });
 alertSchema.index({ user: 1, createdAt: -1 });
+// TTL index: auto-delete alert documents 7 days after creation
+alertSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
 
 // Update timestamp
 alertSchema.pre('save', function() {

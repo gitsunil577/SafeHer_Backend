@@ -496,6 +496,9 @@ exports.getPendingFeedback = asyncHandler(async (req, res) => {
 exports.getNearbyAlerts = asyncHandler(async (req, res) => {
   const { latitude, longitude } = req.query;
 
+  // Only show alerts from last 24 hours (stale alerts are not actionable)
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
   let alerts;
 
   // If location provided, use geospatial query
@@ -503,6 +506,7 @@ exports.getNearbyAlerts = asyncHandler(async (req, res) => {
     try {
       alerts = await Alert.find({
         status: 'active',
+        createdAt: { $gte: oneDayAgo },
         location: {
           $near: {
             $geometry: {
@@ -524,7 +528,10 @@ exports.getNearbyAlerts = asyncHandler(async (req, res) => {
 
   // Fallback: get all active alerts (no location filter)
   if (!alerts) {
-    alerts = await Alert.find({ status: 'active' })
+    alerts = await Alert.find({
+      status: 'active',
+      createdAt: { $gte: oneDayAgo }
+    })
       .sort({ createdAt: -1 })
       .populate('user', 'name')
       .select('location message type priority createdAt')
@@ -649,9 +656,11 @@ exports.getMyAlerts = asyncHandler(async (req, res) => {
 // @route   GET /api/alerts/active
 // @access  Private (User)
 exports.getActiveAlert = asyncHandler(async (req, res) => {
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const alert = await Alert.findOne({
     user: req.user.id,
-    status: { $in: ['active', 'responding'] }
+    status: { $in: ['active', 'responding'] },
+    createdAt: { $gte: oneDayAgo }
   })
     .populate({
       path: 'respondingVolunteer.volunteer',
@@ -661,6 +670,50 @@ exports.getActiveAlert = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data: alert
+  });
+});
+
+// @desc    Get recent alerts for on-duty volunteers (dashboard view)
+// @route   GET /api/alerts/recent
+// @access  Private (Volunteer)
+exports.getRecentAlerts = asyncHandler(async (req, res) => {
+  // Get alerts from last 24 hours (active, responding, resolved, cancelled)
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const alerts = await Alert.find({
+    createdAt: { $gte: since }
+  })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .populate('user', 'name')
+    .populate({
+      path: 'respondingVolunteer.volunteer',
+      populate: { path: 'user', select: 'name' }
+    })
+    .select('user location message type priority status createdAt respondingVolunteer');
+
+  const formatted = alerts.map(alert => {
+    const alertObj = alert.toObject();
+    return {
+      _id: alertObj._id,
+      userName: alertObj.user?.name || 'Unknown User',
+      type: alertObj.type || 'sos',
+      priority: alertObj.priority || 'high',
+      status: alertObj.status,
+      message: alertObj.message || '',
+      location: alertObj.location?.address || 'Location shared',
+      coordinates: alertObj.location?.coordinates
+        ? { lat: alertObj.location.coordinates[1], lng: alertObj.location.coordinates[0] }
+        : null,
+      respondingVolunteerName: alertObj.respondingVolunteer?.volunteer?.user?.name || null,
+      createdAt: alertObj.createdAt
+    };
+  });
+
+  res.status(200).json({
+    success: true,
+    count: formatted.length,
+    data: formatted
   });
 });
 

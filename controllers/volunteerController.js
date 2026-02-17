@@ -17,22 +17,29 @@ exports.getNearbyVolunteers = asyncHandler(async (req, res) => {
 
   // If location provided, use geospatial query
   if (latitude && longitude) {
-    volunteers = await Volunteer.find({
-      ...query,
-      currentLocation: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(longitude), parseFloat(latitude)]
-          },
-          $maxDistance: parseInt(radius)
+    try {
+      volunteers = await Volunteer.find({
+        ...query,
+        currentLocation: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [parseFloat(longitude), parseFloat(latitude)]
+            },
+            $maxDistance: parseInt(radius)
+          }
         }
-      }
-    })
-    .populate('user', 'name phone')
-    .select('user isOnDuty currentLocation stats.rating stats.successfulAssists availability skills')
-    .limit(20);
-  } else {
+      })
+      .populate('user', 'name phone')
+      .select('user isOnDuty currentLocation stats.rating stats.successfulAssists availability skills')
+      .limit(20);
+    } catch (geoErr) {
+      console.log('Geospatial query failed, falling back to non-geo query:', geoErr.message);
+      volunteers = null;
+    }
+  }
+
+  if (!volunteers) {
     // Without location, just get active volunteers
     volunteers = await Volunteer.find(query)
       .populate('user', 'name phone')

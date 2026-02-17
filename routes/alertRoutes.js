@@ -29,6 +29,12 @@ router.get('/nearby/active',
   alertController.getNearbyAlerts
 );
 
+// Recent alerts for volunteer dashboard
+router.get('/recent',
+  authorize('volunteer'),
+  alertController.getRecentAlerts
+);
+
 // Create new alert
 router.post('/',
   authorize('user'),
